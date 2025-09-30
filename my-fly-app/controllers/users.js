@@ -7,6 +7,7 @@ router.get("/", async (req, res) => {
     include: {
       //join query is done using the include option
       model: Note,
+      attributes: { exclude: ["userId"] },
     },
   });
   res.json(users);
@@ -27,6 +28,21 @@ router.get("/:id", async (req, res) => {
     res.json(user);
   } else {
     res.status(404).end();
+  }
+});
+
+// PUT api/users/:username (changing a username, keep in mind that the parameter is not id but username)
+// modifiying a user's username
+router.put("/:username", async (req, res) => {
+  const ourUser = await User.findOne({
+    where: { username: req.params.username },
+  });
+  if (ourUser) {
+    ourUser.username = req.body.username;
+    await ourUser.save();
+    res.json(ourUser);
+  } else {
+    res.status(400).end();
   }
 });
 

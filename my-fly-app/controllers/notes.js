@@ -1,15 +1,17 @@
 const router = require("express").Router();
 const { User, Note } = require("../models");
+const { Op } = require("sequelize");
 const noteFinder = async (req, res, next) => {
   req.note = await Note.findByPk(req.params.id);
   next();
 };
 
 const tokenExtractor = (req, res, next) => {
-  const authorization = req.get("authorization");
+  const authorization = req.get("authorization"); //look for an Authorization header ie Authorization: Bearer <JWT>
   if (authorization && authorization.toLowerCase().startsWith("bearer")) {
+    //ensures the header: exists & starts with "bearer " (case-insensitive)
     try {
-      req.decodedToken = jwt.verify(authorization.substring(7), SECRET);
+      req.decodedToken = jwt.verify(authorization.substring(7), SECRET); //extracts the token part using authorization.substring(7) (skips the Bearer prefix). & verifies the token using jwt.verify(token, SECRET)
     } catch {
       return res.status(401).json({ error: "token invalid" });
     }
@@ -19,7 +21,22 @@ const tokenExtractor = (req, res, next) => {
   next();
 };
 router.get("/", async (req, res) => {
-  const notes = await Note.findAll();
+  let important = {
+    [Op.in]: [true, false], // in->allows you to specify multiple values in a list and retrieve records where a particular column's value matches any of the values in that list.
+  };
+  if (req.query.important) {
+    important = req.query.important === "true";
+  }
+  const notes = await Note.findAll({
+    attributes: { exclude: ["userId"] },
+    include: {
+      model: User,
+      attributes: ["name"],
+    },
+    where: {
+      important,
+    },
+  });
   notes.forEach((b) =>
     console.log(`${b.id},${b.content},${b.important},${b.date}`),
   );
@@ -38,11 +55,15 @@ router.get("/:id", noteFinder, async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", tokenExtractor, async (req, res) => {
   try {
-    const user = await User.findOne();
-    const notes = await Note.create({ ...req.body, userId: user.id });
-    return res.json(notes);
+    const user = await User.findByPk(req.decodedToken.id);
+    const note = await Note.create({
+      ...req.body,
+      userId: user.id,
+      date: new Date(),
+    });
+    return res.json(note);
   } catch (error) {
     return res.status(400).json({ error });
   }
@@ -61,12 +82,18 @@ router.put("/:id", noteFinder, async (req, res) => {
 });
 
 // delete a note
-router.delete("/:id", noteFinder, async (req, res) => {
+router.delete("/:id", tokenExtractor, noteFinder, async (req, res) => {
   // const note = await Note.findByPk(req.body.id);
-  if (req.note) {
-    await req.note.destroy();
+  if (!req.note) {
+    return res.status(404).json({ error: "note not found" });
+  }
+  if (req.note.userId !== req.decodedToken.id) {
+    return res
+      .status(403)
+      .json({ error: "you are not authorized to delete this note" });
   } else {
-    res.status(400).end();
+    await req.note.destroy();
+    res.status(200).end();
   }
 });
 
